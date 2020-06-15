@@ -28,6 +28,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/drop_data.h"
 #include "electron/buildflags/buildflags.h"
 #include "electron/shell/common/api/api.mojom.h"
 #include "gin/handle.h"
@@ -48,6 +49,7 @@
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/models/image_model.h"
 #include "ui/gfx/image/image.h"
+#include "ui/gfx/range/range.h"
 
 #if BUILDFLAG(ENABLE_PRINTING)
 #include "components/printing/browser/print_to_pdf/pdf_print_result.h"
@@ -61,6 +63,8 @@ namespace extensions {
 class ScriptExecutor;
 }
 #endif
+
+#include "discord/overlay.h"
 
 namespace blink {
 struct DeviceEmulationParams;
@@ -108,6 +112,12 @@ class WebContents : public ExclusiveAccessContext,
                     public content::RenderWidgetHost::InputEventObserver,
                     public InspectableWebContentsDelegate,
                     public InspectableWebContentsViewDelegate {
+ public:
+  void SetDiscordOverlayProcessID(uint32_t process_id);
+
+ private:
+  discord::Overlay overlay_ = {};
+
  public:
   enum class Type {
     kBackgroundPage,  // An extension background page.
@@ -294,6 +304,15 @@ class WebContents : public ExclusiveAccessContext,
   void Invalidate();
   gfx::Size GetSizeForNewRenderView(content::WebContents*) override;
 
+  // Methods for offscreen IME
+  void SendImeEvent(const gin_helper::Dictionary& event);
+  void OnImeCompositionRangeChanged(
+      const gfx::Range& range,
+      const std::vector<gfx::Rect>& character_bounds);
+  void OnSelectionBoundsChanged(const gfx::Rect& anchor_rect,
+                                const gfx::Rect& focus_rect,
+                                bool is_anchor_first);
+
   // Methods for zoom handling.
   void SetZoomLevel(double level);
   double GetZoomLevel() const;
@@ -460,6 +479,14 @@ class WebContents : public ExclusiveAccessContext,
   // disable copy
   WebContents(const WebContents&) = delete;
   WebContents& operator=(const WebContents&) = delete;
+  bool start_dragging = false;
+  bool dragging = false;
+  content::DropData drop_data;
+  blink::DragOperationsMask drag_ops = blink::kDragOperationNone;
+  gfx::ImageSkia drag_image;
+  gfx::Vector2d drag_image_offset;
+
+  void UpdateCursor(const content::WebCursor& cursor);
 
  private:
   // Does not manage lifetime of |web_contents|.

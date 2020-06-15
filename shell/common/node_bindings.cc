@@ -91,6 +91,22 @@
   V(electron_renderer_context_bridge) \
   V(electron_renderer_crash_reporter) \
   V(electron_renderer_ipc)            \
+  V(electron_browser_window)             \
+  V(electron_common_asar)                \
+  V(electron_common_clipboard)           \
+  V(electron_common_command_line)        \
+  V(electron_common_environment)         \
+  V(electron_common_features)            \
+  V(electron_common_native_image)        \
+  V(electron_common_native_theme)        \
+  V(electron_common_notification)        \
+  V(electron_common_screen)              \
+  V(electron_common_shell)               \
+  V(electron_common_v8_util)             \
+  V(electron_renderer_context_bridge)    \
+  V(electron_renderer_crash_reporter)    \
+  V(electron_renderer_discord)           \
+  V(electron_renderer_ipc)               \
   V(electron_renderer_web_frame)
 
 #define ELECTRON_UTILITY_BINDINGS(V) V(electron_utility_parent_port)

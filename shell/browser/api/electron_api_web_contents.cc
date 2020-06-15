@@ -138,6 +138,7 @@
 #include "third_party/blink/public/mojom/messaging/transferable_message.mojom.h"
 #include "third_party/blink/public/mojom/renderer_preferences.mojom.h"
 #include "ui/base/cursor/cursor.h"
+#include "ui/base/ime/ime_text_span.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
 #include "ui/display/screen.h"
 #include "ui/events/base_event_utils.h"
@@ -1871,6 +1872,17 @@ bool WebContents::EmitNavigationEvent(
 
   v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
   v8::HandleScope handle_scope(isolate);
+void WebContents::UpdateCursor(const content::WebCursor& cursor)
+{
+  OnCursorChanged(cursor);
+}
+
+void WebContents::BindElectronBrowser(
+    mojo::PendingReceiver<mojom::ElectronBrowser> receiver,
+    content::RenderFrameHost* render_frame_host) {
+  auto id = receivers_.Add(this, std::move(receiver), render_frame_host);
+  frame_to_receivers_map_[render_frame_host].push_back(id);
+}
 
   gin::Handle<gin_helper::internal::Event> event =
       gin_helper::internal::Event::New(isolate);
@@ -3291,6 +3303,40 @@ void WebContents::SendInputEvent(v8::Isolate* isolate,
       } else {
         rwh->ForwardMouseEvent(mouse_event);
       }
+
+      auto* host = view->GetRenderWidgetHost();
+      auto pt = gfx::PointF(mouse_event.PositionInWidget().x(),
+                            mouse_event.PositionInWidget().y());
+      if (type == blink::WebInputEvent::Type::kMouseMove) {
+        if (!dragging && start_dragging) {
+          host->DragTargetDragEnter(drop_data, pt, pt, drag_ops,
+                                    mouse_event.GetModifiers());
+          dragging = true;
+
+          auto* bitmap = drag_image.bitmap();
+          if (bitmap) {
+            Emit("start-drag", gfx::Image::CreateFrom1xBitmap(*bitmap),
+                 gfx::Point(drag_image_offset.x(), drag_image_offset.y()));
+          } else {
+            Emit("start-drag");
+          }
+        }
+        if (dragging) {
+          host->DragTargetDragOver(pt, pt, drag_ops,
+                                   mouse_event.GetModifiers());
+        }
+      } else if (type == blink::WebInputEvent::Type::kMouseUp && dragging) {
+        Emit("stop-drag");
+
+        host->DragTargetDrop(drop_data, pt, pt, mouse_event.GetModifiers());
+        host->DragSourceEndedAt(pt, pt, drag_ops);
+        host->DragSourceSystemDragEnded();
+
+        drop_data = {};
+        start_dragging = false;
+        dragging = false;
+        drag_ops = blink::kDragOperationNone;
+      }
       return;
     }
   } else if (blink::WebInputEvent::IsKeyboardEventType(type)) {
@@ -3481,7 +3527,10 @@ bool WebContents::IsOffScreen() const {
 }
 
 void WebContents::OnPaint(const gfx::Rect& dirty_rect, const SkBitmap& bitmap) {
-  Emit("paint", dirty_rect, gfx::Image::CreateFrom1xBitmap(bitmap));
+  if (!overlay_.SendFrame(bitmap.width(), bitmap.height(), bitmap.getPixels(),
+                          bitmap.rowBytes() * bitmap.height())) {
+    Emit("paint", dirty_rect, gfx::Image::CreateFrom1xBitmap(bitmap));
+  }
 }
 
 void WebContents::StartPainting() {
@@ -3534,6 +3583,114 @@ gfx::Size WebContents::GetSizeForNewRenderView(content::WebContents* wc) {
   }
 
   return gfx::Size();
+}
+
+void WebContents::SendImeEvent(const gin_helper::Dictionary& event) {
+  if (!IsOffScreen()) {
+    return;
+  }
+
+#if BUILDFLAG(ENABLE_OSR)
+  auto* view = static_cast<OffScreenRenderWidgetHostView*>(
+      web_contents()->GetRenderWidgetHostView());
+  if (!view) {
+    return;
+  }
+
+  auto* host = view->render_widget_host();
+  if (!host) {
+    return;
+  }
+
+  std::string type{};
+  if (!event.Get("type", &type)) {
+    return;
+  }
+
+  if (type == "commit") {
+    base::string16 text{};
+    if (event.Get("text", &text)) {
+      gfx::Range range(UINT32_MAX, UINT32_MAX);
+      host->ImeCommitText(text, {}, range, 0);
+      view->RequestCompositionUpdates(false);
+    }
+  } else if (type == "set") {
+    base::string16 text{};
+    if (!event.Get("text", &text)) {
+      return;
+    }
+
+    ui::ImeTextSpans under{};
+    std::vector<gin_helper::Dictionary> underlines;
+    event.Get("underlines", &underlines);
+    for (auto& u : underlines) {
+      ui::ImeTextSpan temp{};
+      temp.type = ui::ImeTextSpan::Type::kComposition;
+      u.Get("from", &temp.start_offset);
+      u.Get("to", &temp.end_offset);
+      int thick{0};
+      u.Get("thick", &thick);
+      temp.thickness = (thick != 0) ? ui::ImeTextSpan::Thickness::kThick
+                                    : ui::ImeTextSpan::Thickness::kNone;
+      u.Get("color", &temp.underline_color);
+      u.Get("backgroundColor", &temp.background_color);
+      under.emplace_back(std::move(temp));
+    }
+
+    gfx::Range replacementRange(UINT32_MAX, UINT32_MAX);
+
+    int selectionRangeFrom{0};
+    event.Get("from", &selectionRangeFrom);
+
+    int selectionRangeTo{0};
+    event.Get("to", &selectionRangeTo);
+
+    view->RequestCompositionUpdates(true);
+    host->ImeSetComposition(text, under, replacementRange, selectionRangeFrom,
+                            selectionRangeTo);
+  } else if (type == "cancel") {
+    view->ImeCancelComposition();
+  }
+#endif
+}
+
+void WebContents::OnImeCompositionRangeChanged(
+    const gfx::Range& range,
+    const std::vector<gfx::Rect>& character_bounds) {
+  v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+  v8::Locker locker(isolate);
+  v8::HandleScope handle_scope(isolate);
+  std::vector<gin_helper::Dictionary> bounds{};
+  bounds.reserve(character_bounds.size());
+  for (const auto& b : character_bounds) {
+    gin_helper::Dictionary bound = gin::Dictionary::CreateEmpty(isolate);
+    bound.Set("x", b.x());
+    bound.Set("y", b.y());
+    bound.Set("width", b.width());
+    bound.Set("height", b.height());
+    bounds.emplace_back(std::move(bound));
+  }
+  Emit("ime-composition-range-changed", range.start(), range.end(), bounds);
+}
+
+void WebContents::OnSelectionBoundsChanged(const gfx::Rect& anchor_rect,
+                                           const gfx::Rect& focus_rect,
+                                           bool is_anchor_first) {
+  v8::Isolate* isolate = JavascriptEnvironment::GetIsolate();
+  v8::Locker locker(isolate);
+  v8::HandleScope handle_scope(isolate);
+  gin_helper::Dictionary anchor_rect_dict = gin::Dictionary::CreateEmpty(isolate);
+  anchor_rect_dict.Set("x", anchor_rect.x());
+  anchor_rect_dict.Set("y", anchor_rect.y());
+  anchor_rect_dict.Set("width", anchor_rect.width());
+  anchor_rect_dict.Set("height", anchor_rect.height());
+  gin_helper::Dictionary focus_rect_dict = gin::Dictionary::CreateEmpty(isolate);
+  focus_rect_dict.Set("x", focus_rect.x());
+  focus_rect_dict.Set("y", focus_rect.y());
+  focus_rect_dict.Set("width", focus_rect.width());
+  focus_rect_dict.Set("height", focus_rect.height());
+  Emit("selection-bounds-changed", anchor_rect_dict, focus_rect_dict,
+       is_anchor_first);
 }
 
 void WebContents::SetZoomLevel(double level) {
@@ -4171,6 +4328,8 @@ void WebContents::FillObjectTemplate(v8::Isolate* isolate,
   // gin::ObjectTemplateBuilder here to handle the fact that WebContents is
   // destroyable.
   gin_helper::ObjectTemplateBuilder(isolate, templ)
+      .SetMethod("_setDiscordOverlayProcessId",
+                 &WebContents::SetDiscordOverlayProcessID)
       .SetMethod("destroy", &WebContents::Destroy)
       .SetMethod("close", &WebContents::Close)
       .SetMethod("getBackgroundThrottling",
@@ -4252,10 +4411,7 @@ void WebContents::FillObjectTemplate(v8::Isolate* isolate,
       .SetMethod("setFrameRate", &WebContents::SetFrameRate)
       .SetMethod("getFrameRate", &WebContents::GetFrameRate)
       .SetMethod("invalidate", &WebContents::Invalidate)
-      .SetMethod("setZoomLevel", &WebContents::SetZoomLevel)
-      .SetMethod("getZoomLevel", &WebContents::GetZoomLevel)
-      .SetMethod("setZoomFactor", &WebContents::SetZoomFactor)
-      .SetMethod("getZoomFactor", &WebContents::GetZoomFactor)
+
       .SetMethod("getType", &WebContents::GetType)
       .SetMethod("_getPreloadPaths", &WebContents::GetPreloadPaths)
       .SetMethod("getLastWebPreferences", &WebContents::GetLastWebPreferences)
@@ -4400,6 +4556,10 @@ gin::Handle<WebContents> WebContents::CreateFromWebPreferences(
 // static
 WebContents* WebContents::FromID(int32_t id) {
   return GetAllWebContents().Lookup(id);
+}
+
+void WebContents::SetDiscordOverlayProcessID(uint32_t process_id) {
+  overlay_.SetProcessId(process_id);
 }
 
 // static
