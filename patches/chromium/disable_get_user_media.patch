@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andy Dill <andy.dill@gmail.com>
+Date: Mon, 23 Nov 2020 12:28:53 -0800
+Subject: Disable getUserMedia
+
+We don't use it and without proper user interaction / consent enforcement it is nothing but a liability.
+
+
+diff --git a/third_party/blink/renderer/modules/mediastream/media_devices.cc b/third_party/blink/renderer/modules/mediastream/media_devices.cc
+index b4008feaec110..b0bdea5524273 100644
+--- a/third_party/blink/renderer/modules/mediastream/media_devices.cc
++++ b/third_party/blink/renderer/modules/mediastream/media_devices.cc
+@@ -267,6 +267,13 @@ ScriptPromise MediaDevices::SendUserMediaRequest(
+     UserMediaRequestType media_type,
+     const MediaStreamConstraints* options,
+     ExceptionState& exception_state) {
++
++  exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
++                                    "getUserMedia is not supported.");
++  return ScriptPromise();
++
++  /*
++   * Intentionally disabled
+   if (!script_state->ContextIsValid()) {
+     exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
+                                       "No media device client available; "
+@@ -325,6 +332,7 @@ ScriptPromise MediaDevices::SendUserMediaRequest(
+   auto promise = resolver->Promise();
+   request->Start();
+   return promise;
++  */
+ }
+ 
+ ScriptPromise MediaDevices::getDisplayMediaSet(
+diff --git a/third_party/blink/renderer/modules/mediastream/navigator_media_stream.cc b/third_party/blink/renderer/modules/mediastream/navigator_media_stream.cc
+index a8160cb8d626f..fca690c41e0d0 100644
+--- a/third_party/blink/renderer/modules/mediastream/navigator_media_stream.cc
++++ b/third_party/blink/renderer/modules/mediastream/navigator_media_stream.cc
+@@ -83,6 +83,12 @@ void NavigatorMediaStream::getUserMedia(
+   DCHECK(success_callback);
+   DCHECK(error_callback);
+ 
++  exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
++                                    "getUserMedia is not supported.");
++
++  /*
++   * Intentionally disabled
++
+   if (!navigator.DomWindow()) {
+     exception_state.ThrowDOMException(
+         DOMExceptionCode::kNotSupportedError,
+@@ -132,6 +138,7 @@ void NavigatorMediaStream::getUserMedia(
+   }
+ 
+   request->Start();
++  */
+ }
+ 
+ }  // namespace blink
