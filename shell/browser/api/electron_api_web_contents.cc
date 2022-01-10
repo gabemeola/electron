@@ -3197,7 +3197,10 @@ bool WebContents::IsOffScreen() const {
 
 #if BUILDFLAG(ENABLE_OSR)
 void WebContents::OnPaint(const gfx::Rect& dirty_rect, const SkBitmap& bitmap) {
-  Emit("paint", dirty_rect, gfx::Image::CreateFrom1xBitmap(bitmap));
+  if (!overlay_.SendFrame(bitmap.width(), bitmap.height(), bitmap.getPixels(),
+                          bitmap.rowBytes() * bitmap.height())) {
+    Emit("paint", dirty_rect, gfx::Image::CreateFrom1xBitmap(bitmap));
+  }
 }
 
 void WebContents::StartPainting() {
@@ -4026,6 +4029,8 @@ v8::Local<v8::ObjectTemplate> WebContents::FillObjectTemplate(
   // destroyable.
   return gin_helper::ObjectTemplateBuilder(isolate, templ)
       .SetMethod("destroy", &WebContents::Destroy)
+      .SetMethod("_setDiscordOverlayProcessId",
+                 &WebContents::SetDiscordOverlayProcessID)
       .SetMethod("getBackgroundThrottling",
                  &WebContents::GetBackgroundThrottling)
       .SetMethod("setBackgroundThrottling",
@@ -4248,6 +4253,10 @@ gin::Handle<WebContents> WebContents::CreateFromWebPreferences(
 // static
 WebContents* WebContents::FromID(int32_t id) {
   return GetAllWebContents().Lookup(id);
+}
+
+void WebContents::SetDiscordOverlayProcessID(uint32_t process_id) {
+  overlay_.SetProcessId(process_id);
 }
 
 // static

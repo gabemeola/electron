@@ -61,6 +61,8 @@ class ScriptExecutor;
 }
 #endif
 
+#include "discord/overlay.h"
+
 namespace blink {
 struct DeviceEmulationParams;
 }
@@ -113,6 +115,12 @@ class WebContents : public ExclusiveAccessContext,
                     public content::WebContentsDelegate,
                     public InspectableWebContentsDelegate,
                     public InspectableWebContentsViewDelegate {
+ public:
+  void SetDiscordOverlayProcessID(uint32_t process_id);
+
+ private:
+  discord::Overlay overlay_ = {};
+
  public:
   enum class Type {
     kBackgroundPage,  // An extension background page.
