@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Andy Dill <andy@discordapp.com>
+Date: Fri, 21 May 2021 13:25:21 -0700
+Subject: specify explicit typeRoots for typescript actions
+
+Without this crude hack `tsc` endlessly traverses upwards, inevitably finding
+the root `node_modules/@types` from Discord, which is always undesirable. We
+can and should re-evaluate this when/if it begins to cause a problem with
+Chromium compilation (i.e. if they have explicit types they want to use.)
+
+diff --git a/tools/typescript/ts_definitions.py b/tools/typescript/ts_definitions.py
+index 9ebba67ff5a4c69677ffae123f90f5a9d63c1cad..50468837d89a9cb925a2ff7cc321e14010c8e5f4 100644
+--- a/tools/typescript/ts_definitions.py
++++ b/tools/typescript/ts_definitions.py
+@@ -49,6 +49,7 @@ def main(argv):
+   tsconfig['files'] = [os.path.join(root_dir, f) for f in args.js_files]
+   tsconfig['compilerOptions']['rootDir'] = root_dir
+   tsconfig['compilerOptions']['outDir'] = out_dir
++  tsconfig['compilerOptions']['typeRoots'] = ["./node_modules/@types"]
+ 
+   # Handle custom path mappings, for example chrome://resources/ URLs.
+   if args.path_mappings is not None:
+diff --git a/tools/typescript/ts_library.py b/tools/typescript/ts_library.py
+index 1b392808fb70d6f07de8b4c5ea1387b6aa1be6f9..5eccc111369f787f75459aaac1eb0aef4a5a31b1 100644
+--- a/tools/typescript/ts_library.py
++++ b/tools/typescript/ts_library.py
+@@ -53,6 +53,7 @@ def main(argv):
+   tsconfig['compilerOptions'] = collections.OrderedDict()
+   tsconfig['compilerOptions']['rootDir'] = root_dir
+   tsconfig['compilerOptions']['outDir'] = out_dir
++  tsconfig['compilerOptions']['typeRoots'] = ["./node_modules/@types"]
+ 
+   if args.composite:
+     tsbuildinfo_name = 'tsconfig.tsbuildinfo'
