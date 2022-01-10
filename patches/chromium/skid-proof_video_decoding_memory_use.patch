@@ -1,0 +1,394 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mack Straight <mack@discordapp.com>
+Date: Tue, 4 May 2021 03:23:02 -0700
+Subject: skid-proof video decoding memory use
+
+videos with inline resolution changes can use arbitrary amounts of
+memory to decode. upstream tried to fix this by checking for the OOM
+condition when allocating, but I found it to be inadequate -- the OOM
+crash just ends up happening elsewhere because we're still under severe
+memory pressure.
+
+instead, add a global memory budget for system memory allocated video
+frames. I set it to 768MB because that feels like it should be enough,
+but we can choose any value.
+
+re-evaluate current state of chromium once we upgrade and drop this fix
+if they put something better in.
+
+
+diff --git a/media/base/BUILD.gn b/media/base/BUILD.gn
+index fe3054a0ec0a5..97f97d8af76f5 100644
+--- a/media/base/BUILD.gn
++++ b/media/base/BUILD.gn
+@@ -338,6 +338,8 @@ source_set("base") {
+     "video_frame.h",
+     "video_frame_layout.cc",
+     "video_frame_layout.h",
++    "video_frame_memory_budget.cc",
++    "video_frame_memory_budget.h",
+     "video_frame_metadata.cc",
+     "video_frame_metadata.h",
+     "video_frame_pool.cc",
+@@ -627,6 +629,7 @@ source_set("unit_tests") {
+     "video_color_space_unittest.cc",
+     "video_decoder_config_unittest.cc",
+     "video_frame_layout_unittest.cc",
++    "video_frame_memory_budget_unittest.cc",
+     "video_frame_pool_unittest.cc",
+     "video_frame_unittest.cc",
+     "video_thumbnail_decoder_unittest.cc",
+diff --git a/media/base/limits.h b/media/base/limits.h
+index 817077f1d837d..6403a04ffa5b4 100644
+--- a/media/base/limits.h
++++ b/media/base/limits.h
+@@ -84,6 +84,11 @@ constexpr int kMaxVideoDecodeThreads =
+          // immediate out of memory errors for high resolution content. See
+          // https://crbug.com/893984
+ 
++// Maximum number of bytes to be used to allocate system memory buffers for
++// video frames.
++constexpr int kVideoFrameBufferMemoryBudget = 1024 * 1024 * 768;
++constexpr int kVideoFrameBufferMaxAllocationSize = 4096 * 4096 * 3;
++
+ }  // namespace limits
+ 
+ }  // namespace media
+diff --git a/media/base/video_frame.cc b/media/base/video_frame.cc
+index 4aa077a567840..804cec2df789e 100644
+--- a/media/base/video_frame.cc
++++ b/media/base/video_frame.cc
+@@ -24,6 +24,7 @@
+ #include "media/base/format_utils.h"
+ #include "media/base/limits.h"
+ #include "media/base/timestamp_constants.h"
++#include "media/base/video_frame_memory_budget.h"
+ #include "media/base/video_util.h"
+ #include "ui/gfx/buffer_format_util.h"
+ #include "ui/gfx/geometry/point.h"
+@@ -1416,6 +1417,10 @@ VideoFrame::~VideoFrame() {
+ 
+   for (auto& callback : done_callbacks_)
+     std::move(callback).Run();
++
++  if (budget_allocation_.has_value()) {
++    VideoFrameMemoryBudget::Current()->Release(*budget_allocation_);
++  }
+ }
+ 
+ // static
+@@ -1552,6 +1557,14 @@ bool VideoFrame::AllocateMemory(bool zero_initialize_memory) {
+   std::vector<size_t> plane_size = CalculatePlaneSize();
+   const size_t buffer_size =
+       std::accumulate(plane_size.begin(), plane_size.end(), 0u);
++
++  if (!VideoFrameMemoryBudget::Current()->Request(buffer_size)) {
++    LOG(ERROR) << "Video frame memory budget exhausted";
++    return false;
++  }
++
++  budget_allocation_ = buffer_size;
++
+   const size_t allocation_size =
+       buffer_size + (layout_.buffer_addr_align() - 1);
+ 
+diff --git a/media/base/video_frame.h b/media/base/video_frame.h
+index 8c6d8738915dc..6033ae2876c8b 100644
+--- a/media/base/video_frame.h
++++ b/media/base/video_frame.h
+@@ -794,6 +794,8 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
+ 
+   // Allocation which makes up |data_| planes for self-allocated frames.
+   std::unique_ptr<uint8_t, base::FreeDeleter> private_data_;
++
++  absl::optional<size_t> budget_allocation_;
+ };
+ 
+ }  // namespace media
+diff --git a/media/base/video_frame_budget_unittest.cc b/media/base/video_frame_budget_unittest.cc
+new file mode 100644
+index 0000000000000..3fde8b02a056e
+--- /dev/null
++++ b/media/base/video_frame_budget_unittest.cc
+@@ -0,0 +1,83 @@
++#include "media/base/video_frame_memory_budget.h"
++
++#include "base/bits.h"
++#include "media/base/video_frame.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace media {
++
++class VideoFrameMemoryBudgetTest : public testing::Test {
++ public:
++  VideoFrameMemoryBudgetTest() {}
++  ~VideoFrameMemoryBudgetTest() override {}
++
++ protected:
++  void SetUp() override {
++    VideoFrameMemoryBudget::SetThreadCurrentForTesting(&test_budget_);
++  }
++
++  void TearDown() override {
++    VideoFrameMemoryBudget::SetThreadCurrentForTesting(nullptr);
++  }
++
++  size_t AllocationSizeI420(size_t width, size_t height) {
++    size_t y_stride =
++        base::bits::Align(width, VideoFrame::kFrameAddressAlignment);
++    size_t y_height =
++        base::bits::Align(height, VideoFrame::kFrameAddressAlignment);
++    size_t uv_stride =
++        base::bits::Align(width / 2, VideoFrame::kFrameAddressAlignment);
++    size_t uv_height =
++        base::bits::Align(height / 2, VideoFrame::kFrameAddressAlignment);
++
++    return y_stride * y_height + 2 * uv_stride * uv_height + uv_stride +
++           VideoFrame::kFrameSizePadding;
++  }
++
++  void SetAllocationMaxI420(size_t width, size_t height) {
++    VideoFrameMemoryBudget::Current()->SetMaxAllocationSize(
++        AllocationSizeI420(width, height));
++  }
++
++  void SetMaxFramesI420(size_t width, size_t height, size_t num) {
++    VideoFrameMemoryBudget::Current()->SetMemoryLimit(
++        AllocationSizeI420(width, height) * num);
++  }
++
++  scoped_refptr<VideoFrame> CreateFrame(size_t width, size_t height) {
++    return VideoFrame::CreateZeroInitializedFrame(
++        VideoPixelFormat::PIXEL_FORMAT_I420, gfx::Size(width, height),
++        gfx::Rect(width, height), gfx::Size(width, height), base::TimeDelta());
++  }
++
++ private:
++  VideoFrameMemoryBudget test_budget_;
++};
++
++TEST_F(VideoFrameMemoryBudgetTest, TooBigFramesDontAllocate) {
++  SetAllocationMaxI420(1280, 720);
++  EXPECT_NE(CreateFrame(1280, 720), nullptr);
++  EXPECT_EQ(CreateFrame(1282, 722), nullptr);
++}
++
++TEST_F(VideoFrameMemoryBudgetTest, TooManyBigFramesDontAllocate) {
++  const size_t kWidth = 1280;
++  const size_t kHeight = 720;
++
++  SetAllocationMaxI420(kWidth, kHeight);
++  SetMaxFramesI420(kWidth, kHeight, 4);
++
++  auto frame1 = CreateFrame(kWidth, kHeight);
++  auto frame2 = CreateFrame(kWidth, kHeight);
++  auto frame3 = CreateFrame(kWidth, kHeight);
++  auto frame4 = CreateFrame(kWidth, kHeight);
++  auto frame5 = CreateFrame(kWidth, kHeight);
++
++  EXPECT_NE(frame1, nullptr);
++  EXPECT_NE(frame2, nullptr);
++  EXPECT_NE(frame3, nullptr);
++  EXPECT_NE(frame4, nullptr);
++  EXPECT_EQ(frame5, nullptr);
++}
++
++}  // namespace media
+\ No newline at end of file
+diff --git a/media/base/video_frame_memory_budget.cc b/media/base/video_frame_memory_budget.cc
+new file mode 100644
+index 0000000000000..77c925c3f6a78
+--- /dev/null
++++ b/media/base/video_frame_memory_budget.cc
+@@ -0,0 +1,77 @@
++#include "media/base/video_frame_memory_budget.h"
++
++#include "base/check_op.h"
++#include "base/no_destructor.h"
++#include "base/numerics/safe_math.h"
++#include "base/threading/thread_local.h"
++
++namespace media {
++
++namespace {
++base::ThreadLocalPointer<VideoFrameMemoryBudget>&
++GetThreadLocalCurrentPointer() {
++  static base::NoDestructor<base::ThreadLocalPointer<VideoFrameMemoryBudget>>
++      tls;
++  return *tls;
++}
++}  // namespace
++
++VideoFrameMemoryBudget::VideoFrameMemoryBudget() {}
++VideoFrameMemoryBudget::~VideoFrameMemoryBudget() {
++  // Force `VideoFrameMemoryBudget` to be non-trivially destructible,
++  // so we can use the base::NoDestructor static below.
++}
++
++VideoFrameMemoryBudget* VideoFrameMemoryBudget::Current() {
++  static base::NoDestructor<VideoFrameMemoryBudget> instance;
++  VideoFrameMemoryBudget* thread_local_budget =
++      GetThreadLocalCurrentPointer().Get();
++
++  if (thread_local_budget) {
++    return thread_local_budget;
++  }
++
++  return instance.get();
++}
++
++void VideoFrameMemoryBudget::SetThreadCurrentForTesting(
++    VideoFrameMemoryBudget* current) {
++  GetThreadLocalCurrentPointer().Set(current);
++}
++
++void VideoFrameMemoryBudget::SetMemoryLimit(size_t limit) {
++  memory_limit_ = limit;
++}
++
++void VideoFrameMemoryBudget::SetMaxAllocationSize(size_t limit) {
++  max_allocation_size_ = limit;
++}
++
++bool VideoFrameMemoryBudget::Request(size_t bytes) {
++  if (bytes > max_allocation_size_) {
++    return false;
++  }
++  while (true) {
++    size_t new_allocated;
++    size_t allocated{allocated_.load()};
++
++    if (!base::CheckAdd(allocated, bytes).AssignIfValid(&new_allocated)) {
++      return false;
++    }
++
++    if (new_allocated > memory_limit_) {
++      return false;
++    }
++
++    if (allocated_.compare_exchange_strong(allocated, new_allocated)) {
++      return true;
++    }
++  }
++}
++
++void VideoFrameMemoryBudget::Release(size_t bytes) {
++  DCHECK_GE(allocated_.load(), bytes);
++  allocated_ -= bytes;
++}
++
++}  // namespace media
+diff --git a/media/base/video_frame_memory_budget.h b/media/base/video_frame_memory_budget.h
+new file mode 100644
+index 0000000000000..a62c483484eb8
+--- /dev/null
++++ b/media/base/video_frame_memory_budget.h
+@@ -0,0 +1,36 @@
++#ifndef MEDIA_BASE_VIDEO_FRAME_MEMORY_BUDGET_H_
++#define MEDIA_BASE_VIDEO_FRAME_MEMORY_BUDGET_H_
++
++#include <stddef.h>
++
++#include <atomic>
++
++#include "media/base/limits.h"
++
++namespace media {
++
++class VideoFrameMemoryBudget {
++ public:
++  VideoFrameMemoryBudget();
++  ~VideoFrameMemoryBudget();
++  VideoFrameMemoryBudget(VideoFrameMemoryBudget const&) = delete;
++  VideoFrameMemoryBudget& operator=(VideoFrameMemoryBudget const&) = delete;
++  VideoFrameMemoryBudget(VideoFrameMemoryBudget&&) = delete;
++  VideoFrameMemoryBudget& operator=(VideoFrameMemoryBudget&&) = delete;
++
++  static VideoFrameMemoryBudget* Current();
++  static void SetThreadCurrentForTesting(VideoFrameMemoryBudget* current);
++  void SetMemoryLimit(size_t limit);
++  void SetMaxAllocationSize(size_t limit);
++  bool Request(size_t bytes);
++  void Release(size_t bytes);
++
++ private:
++  size_t memory_limit_{limits::kVideoFrameBufferMemoryBudget};
++  size_t max_allocation_size_{limits::kVideoFrameBufferMaxAllocationSize};
++  std::atomic<size_t> allocated_{0};
++};
++
++}  // namespace media
++
++#endif
+diff --git a/media/filters/frame_buffer_pool.cc b/media/filters/frame_buffer_pool.cc
+index 1bdf7d590e09c..c3896f30657e4 100644
+--- a/media/filters/frame_buffer_pool.cc
++++ b/media/filters/frame_buffer_pool.cc
+@@ -19,10 +19,15 @@
+ #include "base/trace_event/memory_allocator_dump.h"
+ #include "base/trace_event/memory_dump_manager.h"
+ #include "base/trace_event/process_memory_dump.h"
++#include "media/base/video_frame_memory_budget.h"
+ 
+ namespace media {
+ 
+ struct FrameBufferPool::FrameBuffer {
++  ~FrameBuffer() {
++    VideoFrameMemoryBudget::Current()->Release(data_size);
++  }
++
+   // Not using std::vector<uint8_t> as resize() calls take a really long time
+   // for large buffers.
+   std::unique_ptr<uint8_t, base::FreeDeleter> data;
+@@ -69,11 +74,20 @@ uint8_t* FrameBufferPool::GetFrameBuffer(size_t min_size, void** fb_priv) {
+   auto& frame_buffer = *it;
+ 
+   // Resize the frame buffer if necessary.
+-  frame_buffer->held_by_library = true;
+   if (frame_buffer->data_size < min_size) {
+     // Free the existing |data| first so that the memory can be reused,
+     // if possible. Note that the new array is purposely not initialized.
+     frame_buffer->data.reset();
++    VideoFrameMemoryBudget::Current()->Release(frame_buffer->data_size);
++    frame_buffer->data_size = 0;
++
++    if (!VideoFrameMemoryBudget::Current()->Request(min_size)) {
++      // We just dropped the previous data buffer, so if the allocation failed,
++      // erase this entry from the cache.
++      frame_buffers_.erase(it);
++      *fb_priv = nullptr;
++      return nullptr;
++    }
+ 
+     uint8_t* data = nullptr;
+     if (force_allocation_error_ ||
+@@ -87,6 +101,8 @@ uint8_t* FrameBufferPool::GetFrameBuffer(size_t min_size, void** fb_priv) {
+     frame_buffer->data_size = min_size;
+   }
+ 
++  frame_buffer->held_by_library = true;
++
+   // Provide the client with a private identifier.
+   *fb_priv = frame_buffer.get();
+   return frame_buffer->data.get();
+diff --git a/media/test/run_all_unittests.cc b/media/test/run_all_unittests.cc
+index 67240f15dbb0f..ad7727e8cf4a8 100644
+--- a/media/test/run_all_unittests.cc
++++ b/media/test/run_all_unittests.cc
+@@ -10,6 +10,7 @@
+ #include "media/base/fake_localized_strings.h"
+ #include "media/base/media.h"
+ #include "media/base/media_switches.h"
++#include "media/base/video_frame_memory_budget.h"
+ #include "mojo/core/embedder/embedder.h"
+ 
+ #if BUILDFLAG(IS_ANDROID)
+@@ -43,6 +44,8 @@ void TestSuiteNoAtExit::Initialize() {
+   media::SetUpFakeLocalizedStrings();
+ 
+   base::DiscardableMemoryAllocator::SetInstance(&discardable_memory_allocator_);
++  media::VideoFrameMemoryBudget::Current()->SetMemoryLimit(SIZE_MAX);
++  media::VideoFrameMemoryBudget::Current()->SetMaxAllocationSize(SIZE_MAX);
+ }
+ 
+ int main(int argc, char** argv) {
