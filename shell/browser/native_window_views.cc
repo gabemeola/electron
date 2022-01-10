@@ -1645,7 +1645,7 @@ ui::WindowShowState NativeWindowViews::GetRestoredState() {
   if (IsFullscreen())
     return ui::SHOW_STATE_FULLSCREEN;
 
-  return ui::SHOW_STATE_NORMAL;
+  return ui::SHOW_STATE_DEFAULT;
 }
 
 void NativeWindowViews::MoveBehindTaskBarIfNeeded() {
