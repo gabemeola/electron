@@ -149,3 +149,4 @@ cherry-pick-22c61cfae5d1.patch
 post_media_log_destruction_to_avoid_destruction.patch
 add_stop_method_to_batchingmedialog.patch
 make_gtk_getlibgtk_public.patch
+ignore_mouse_buttons_other_than_left_right_middle.patch
