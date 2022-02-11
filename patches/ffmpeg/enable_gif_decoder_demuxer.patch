@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mack Straight <mack@discordapp.com>
+Date: Tue, 1 Feb 2022 04:45:11 +0000
+Subject: enable gif decoder/demuxer
+
+we need it.
+
+diff --git a/chromium/scripts/build_ffmpeg.py b/chromium/scripts/build_ffmpeg.py
+index b4db1771f1c0485ad64f9d5300ac5fc84de0d8bc..8f7caa29a220d5e7e437b6c4451429a22e5182bd 100755
+--- a/chromium/scripts/build_ffmpeg.py
++++ b/chromium/scripts/build_ffmpeg.py
+@@ -728,8 +728,8 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
+       # Common codecs.
+       '--enable-decoder=vorbis,libopus,flac',
+       '--enable-decoder=pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,mp3',
+-      '--enable-decoder=pcm_s16be,pcm_s24be,pcm_mulaw,pcm_alaw',
+-      '--enable-demuxer=ogg,matroska,wav,flac,mp3,mov',
++      '--enable-decoder=pcm_s16be,pcm_s24be,pcm_mulaw,pcm_alaw,gif',
++      '--enable-demuxer=ogg,matroska,wav,flac,mp3,mov,gif',
+       '--enable-parser=opus,vorbis,flac,mpegaudio,vp9',
+ 
+       # Setup include path so Chromium's libopus can be used.
