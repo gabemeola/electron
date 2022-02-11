@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mack Straight <mack@discordapp.com>
+Date: Tue, 1 Feb 2022 01:02:48 +0000
+Subject: fix: conditionally include electron deps
+
+ffmpeg update process gn gens some builds for android. this breaks
+bc electron doesn't build on android, but it doesn't need that.
+
+so only include electron deps if we're building electron.
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index b0f575de4c9dc6e23da5822a1591d78478aeece8..83e646843c46b3c5677a2190cd9c673014105d86 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -7010,9 +7010,12 @@ static_library("browser") {
+     deps += [
+       "//components/spellcheck/browser",
+       "//components/spellcheck/common",
+-      "//electron:resources",
+     ]
+ 
++    if (is_electron_build) {
++      deps += [ "//electron:resources" ]
++    }
++
+     if (!is_android) {
+       deps += [ "//third_party/hunspell" ]
+     }
+diff --git a/components/language/core/browser/BUILD.gn b/components/language/core/browser/BUILD.gn
+index 11454e9e7cd06717033631cc4627c3d061301863..59ea7ee9af1e3b44e6ee33279f8a8518d11077ff 100644
+--- a/components/language/core/browser/BUILD.gn
++++ b/components/language/core/browser/BUILD.gn
+@@ -30,9 +30,12 @@ static_library("browser") {
+     "//components/pref_registry",
+     "//components/prefs",
+     "//components/strings",
+-    "//electron:resources",
+     "//ui/base",
+   ]
++
++  if (is_electron_build) {
++    deps += [ "//electron:resources" ]
++  }
+ }
+ 
+ source_set("unit_tests") {
