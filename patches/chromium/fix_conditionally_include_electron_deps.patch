@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mack Straight <mack@discordapp.com>
+Date: Tue, 1 Feb 2022 01:02:48 +0000
+Subject: fix: conditionally include electron deps
+
+ffmpeg update process gn gens some builds for android. this breaks
+bc electron doesn't build on android, but it doesn't need that.
+
+so only include electron deps if we're building electron.
+
+
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+index 63807e436ef70..3c84ed1c7a9d8 100644
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -7671,6 +7671,10 @@ static_library("browser") {
+       "//components/spellcheck/common",
+     ]
+ 
++    if (is_electron_build) {
++      deps += [ "//electron:resources" ]
++    }
++
+     if (!is_android) {
+       deps += [ "//third_party/hunspell" ]
+     }
+diff --git a/components/language/core/browser/BUILD.gn b/components/language/core/browser/BUILD.gn
+index 741bcba3fc550..03f74219d1c0d 100644
+--- a/components/language/core/browser/BUILD.gn
++++ b/components/language/core/browser/BUILD.gn
+@@ -35,6 +35,10 @@ static_library("browser") {
+     "//components/strings",
+     "//ui/base",
+   ]
++
++  if (is_electron_build) {
++    deps += [ "//electron:resources" ]
++  }
+ }
+ 
+ source_set("unit_tests") {

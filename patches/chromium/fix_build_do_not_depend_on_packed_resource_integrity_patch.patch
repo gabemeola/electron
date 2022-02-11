@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mack Straight <mack@discord.com>
+Date: Tue, 7 Mar 2023 16:30:08 -0800
+Subject: fix build_do_not_depend_on_packed_resource_integrity.patch
+
+upstream put the conditional add of packed_resources_integrity_hash
+in the wrong place. it was removed from a !is_android branch and
+added outside of it.
+
+diff --git a/chrome/test/BUILD.gn b/chrome/test/BUILD.gn
+index 60a43d97d47924e4d95ab27feb0a365e52878bfc..81506179eac1d0d427f3267563d9cfc73fac5fe6 100644
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -7196,6 +7196,10 @@ test("unit_tests") {
+         ]
+       }
+     }
++
++    if (!is_electron_build) {
++      deps += [ "//chrome:packed_resources_integrity_hash" ]
++    }
+   }
+ 
+   if (is_chromeos) {
+@@ -7235,10 +7239,6 @@ test("unit_tests") {
+     }
+   }
+ 
+-  if (!is_electron_build) {
+-    deps += [ "//chrome:packed_resources_integrity_hash" ]
+-  }
+-
+   if (is_chromeos_ash) {
+     sources -= [
+       "../browser/policy/cloud/user_policy_signin_service_unittest.cc",

@@ -1,1 +1,5 @@
 link_with_loader_path.patch
+specify_that_we_re_not_building_electron.patch
+don_t_remove_obj_files_from_the_build_that_we_need.patch
+add_discord_ffmpeg_config_options.patch
+regenerate_ffmpeg_gn.patch

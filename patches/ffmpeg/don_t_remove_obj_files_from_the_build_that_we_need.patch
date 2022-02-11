@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mack Straight <mack@discord.com>
+Date: Fri, 10 Mar 2023 03:09:15 -0800
+Subject: don't remove obj files from the build that we need
+
+sdp.o: required by mp4 mux
+lls.o: required by aac encoder
+
+diff --git a/chromium/scripts/generate_gn.py b/chromium/scripts/generate_gn.py
+index e86c7e0b6f04c8b3f326b16b2e716c396104eebc..692b1477fa27366385caadc44b0044541239f833 100755
+--- a/chromium/scripts/generate_gn.py
++++ b/chromium/scripts/generate_gn.py
+@@ -116,7 +116,6 @@ def CleanObjectFiles(object_files):
+       'libavcodec/resample.o',
+       'libavcodec/resample2.o',
+       'libavcodec/x86/dnxhd_mmx.o',
+-      'libavformat/sdp.o',
+       'libavutil/adler32.o',
+       'libavutil/avsscanf.o',
+       'libavutil/audio_fifo.o',
+@@ -126,7 +125,6 @@ def CleanObjectFiles(object_files):
+       'libavutil/file.o',
+       'libavutil/hash.o',
+       'libavutil/hmac.o',
+-      'libavutil/lls.o',
+       'libavutil/murmur3.o',
+       'libavutil/rc4.o',
+       'libavutil/ripemd.o',
