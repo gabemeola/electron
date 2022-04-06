@@ -17,10 +17,10 @@ re-evaluate current state of chromium once we upgrade and drop this fix
 if they put something better in.
 
 diff --git a/media/base/BUILD.gn b/media/base/BUILD.gn
-index 80cc2864762202bcf4211e8682d0fec3057bc655..2182186c0dca1be58caf4bba237d7ae8cddbd622 100644
+index 86557c5ae9b43068676d274602e91dccf9f5184b..1b55d8e751eb587c91d7e496c7ea5520bd6ba403 100644
 --- a/media/base/BUILD.gn
 +++ b/media/base/BUILD.gn
-@@ -313,6 +313,8 @@ jumbo_source_set("base") {
+@@ -335,6 +335,8 @@ source_set("base") {
      "video_frame.h",
      "video_frame_layout.cc",
      "video_frame_layout.h",
@@ -29,7 +29,7 @@ index 80cc2864762202bcf4211e8682d0fec3057bc655..2182186c0dca1be58caf4bba237d7ae8
      "video_frame_metadata.cc",
      "video_frame_metadata.h",
      "video_frame_pool.cc",
-@@ -577,6 +579,7 @@ source_set("unit_tests") {
+@@ -622,6 +624,7 @@ source_set("unit_tests") {
      "video_color_space_unittest.cc",
      "video_decoder_config_unittest.cc",
      "video_frame_layout_unittest.cc",
@@ -38,10 +38,10 @@ index 80cc2864762202bcf4211e8682d0fec3057bc655..2182186c0dca1be58caf4bba237d7ae8
      "video_frame_unittest.cc",
      "video_thumbnail_decoder_unittest.cc",
 diff --git a/media/base/limits.h b/media/base/limits.h
-index 72980b35e65077162b9f4290592c36a00ce2f3b2..412d85d6536256bfc7f8d972426297d8c2517bb0 100644
+index 5430e09c1cbe49d22946efc349af3a170cb9bda8..bf95c618bf961613f4693348840087f785019564 100644
 --- a/media/base/limits.h
 +++ b/media/base/limits.h
-@@ -81,6 +81,11 @@ enum {
+@@ -84,6 +84,11 @@ enum {
        16,  // Matches ffmpeg's MAX_AUTO_THREADS. Higher values can result in
             // immediate out of memory errors for high resolution content. See
             // https://crbug.com/893984
@@ -54,10 +54,10 @@ index 72980b35e65077162b9f4290592c36a00ce2f3b2..412d85d6536256bfc7f8d972426297d8
  
  }  // namespace limits
 diff --git a/media/base/video_frame.cc b/media/base/video_frame.cc
-index 0bb025a1d5ff8364ad0071e24166c950dc713895..e84f21da1dbfe99853c7fa0f075a548742ee1669 100644
+index 8e59b5fc863b32432413c6f9c7621827e2a5bc98..579b34f29871ea9c347c51a7c7f9a4166f39bff2 100644
 --- a/media/base/video_frame.cc
 +++ b/media/base/video_frame.cc
-@@ -23,6 +23,7 @@
+@@ -22,6 +22,7 @@
  #include "media/base/format_utils.h"
  #include "media/base/limits.h"
  #include "media/base/timestamp_constants.h"
@@ -65,7 +65,7 @@ index 0bb025a1d5ff8364ad0071e24166c950dc713895..e84f21da1dbfe99853c7fa0f075a5487
  #include "media/base/video_util.h"
  #include "ui/gfx/buffer_format_util.h"
  #include "ui/gfx/geometry/point.h"
-@@ -1170,6 +1171,10 @@ VideoFrame::~VideoFrame() {
+@@ -1394,6 +1395,10 @@ VideoFrame::~VideoFrame() {
  
    for (auto& callback : done_callbacks_)
      std::move(callback).Run();
@@ -76,69 +76,34 @@ index 0bb025a1d5ff8364ad0071e24166c950dc713895..e84f21da1dbfe99853c7fa0f075a5487
  }
  
  // static
-@@ -1237,8 +1242,7 @@ scoped_refptr<VideoFrame> VideoFrame::CreateFrameWithLayout(
- 
-   scoped_refptr<VideoFrame> frame(new VideoFrame(
-       std::move(layout), storage, visible_rect, natural_size, timestamp));
--  frame->AllocateMemory(zero_initialize_memory);
--  return frame;
-+  return frame->AllocateMemory(zero_initialize_memory) ? frame : nullptr;
- }
- 
- // static
-@@ -1253,7 +1257,7 @@ gfx::Size VideoFrame::CommonAlignment(VideoPixelFormat format) {
-   return gfx::Size(max_sample_width, max_sample_height);
- }
- 
--void VideoFrame::AllocateMemory(bool zero_initialize_memory) {
-+bool VideoFrame::AllocateMemory(bool zero_initialize_memory) {
-   DCHECK_EQ(storage_type_, STORAGE_OWNED_MEMORY);
-   static_assert(0 == kYPlane, "y plane data must be index 0");
- 
-@@ -1261,6 +1265,13 @@ void VideoFrame::AllocateMemory(bool zero_initialize_memory) {
-   const size_t total_buffer_size =
+@@ -1531,6 +1536,14 @@ bool VideoFrame::AllocateMemory(bool zero_initialize_memory) {
+   std::vector<size_t> plane_size = CalculatePlaneSize();
+   const size_t buffer_size =
        std::accumulate(plane_size.begin(), plane_size.end(), 0u);
- 
-+  if (!VideoFrameMemoryBudget::Current()->Request(total_buffer_size)) {
++
++  if (!VideoFrameMemoryBudget::Current()->Request(buffer_size)) {
 +    LOG(ERROR) << "Video frame memory budget exhausted";
 +    return false;
 +  }
 +
-+  budget_allocation_ = total_buffer_size;
++  budget_allocation_ = buffer_size;
 +
-   uint8_t* data = reinterpret_cast<uint8_t*>(
-       base::AlignedAlloc(total_buffer_size, layout_.buffer_addr_align()));
-   if (zero_initialize_memory) {
-@@ -1274,6 +1285,7 @@ void VideoFrame::AllocateMemory(bool zero_initialize_memory) {
-     data_[plane] = data + offset;
-     offset += plane_size[plane];
-   }
-+  return true;
- }
+   const size_t allocation_size =
+       buffer_size + (layout_.buffer_addr_align() - 1);
  
- bool VideoFrame::IsValidSharedMemoryFrame() const {
 diff --git a/media/base/video_frame.h b/media/base/video_frame.h
-index 6b1a5b455a7e7a37ad51fee38fe859b0980a99fc..737884abb16329eda743f302987a0dc7636954ac 100644
+index c2f4216f22e45c018dbde60cf3414206b5a51bc1..a527c490c05f83f48e3312a8c1993ec697cb5e93 100644
 --- a/media/base/video_frame.h
 +++ b/media/base/video_frame.h
-@@ -598,7 +598,7 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
-   // alignment for each individual plane.
-   static gfx::Size CommonAlignment(VideoPixelFormat format);
- 
--  void AllocateMemory(bool zero_initialize_memory);
-+  WARN_UNUSED_RESULT bool AllocateMemory(bool zero_initialize_memory);
- 
-   // Calculates plane size.
-   // It first considers buffer size layout_ object provides. If layout's
-@@ -690,6 +690,8 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
+@@ -779,6 +779,8 @@ class MEDIA_EXPORT VideoFrame : public base::RefCountedThreadSafe<VideoFrame> {
    // Sampler conversion information which is used in vulkan context for android.
-   base::Optional<gpu::VulkanYCbCrInfo> ycbcr_info_;
+   absl::optional<gpu::VulkanYCbCrInfo> ycbcr_info_;
  
-+  base::Optional<size_t> budget_allocation_;
++  absl::optional<size_t> budget_allocation_;
 +
-   DISALLOW_IMPLICIT_CONSTRUCTORS(VideoFrame);
+   // Allocation which makes up |data_| planes for self-allocated frames.
+   std::unique_ptr<uint8_t, base::FreeDeleter> private_data_;
  };
- 
 diff --git a/media/base/video_frame_memory_budget.cc b/media/base/video_frame_memory_budget.cc
 new file mode 100644
 index 0000000000000000000000000000000000000000..d396709d3ac65f74445b75375ec045a316e67985
@@ -349,8 +314,58 @@ index 0000000000000000000000000000000000000000..3fde8b02a056ef331cd5f6721a7b71e8
 +
 +}  // namespace media
 \ No newline at end of file
+diff --git a/media/filters/frame_buffer_pool.cc b/media/filters/frame_buffer_pool.cc
+index 275b86046f60238706ec416cede61fc9f93f09da..ee7d688f72f6e33d71511c8d239f3b461f1c95f8 100644
+--- a/media/filters/frame_buffer_pool.cc
++++ b/media/filters/frame_buffer_pool.cc
+@@ -17,10 +17,14 @@
+ #include "base/trace_event/memory_allocator_dump.h"
+ #include "base/trace_event/memory_dump_manager.h"
+ #include "base/trace_event/process_memory_dump.h"
++#include "media/base/video_frame_memory_budget.h"
+ 
+ namespace media {
+ 
+ struct FrameBufferPool::FrameBuffer {
++  ~FrameBuffer() {
++    VideoFrameMemoryBudget::Current()->Release(data_size);
++  }
+   // Not using std::vector<uint8_t> as resize() calls take a really long time
+   // for large buffers.
+   std::unique_ptr<uint8_t, base::FreeDeleter> data;
+@@ -68,11 +72,20 @@ uint8_t* FrameBufferPool::GetFrameBuffer(size_t min_size, void** fb_priv) {
+   auto& frame_buffer = *it;
+ 
+   // Resize the frame buffer if necessary.
+-  frame_buffer->held_by_library = true;
+   if (frame_buffer->data_size < min_size) {
+     // Free the existing |data| first so that the memory can be reused,
+     // if possible. Note that the new array is purposely not initialized.
+     frame_buffer->data.reset();
++    VideoFrameMemoryBudget::Current()->Release(frame_buffer->data_size);
++    frame_buffer->data_size = 0;
++
++    if (!VideoFrameMemoryBudget::Current()->Request(min_size)) {
++      // We just dropped the previous data buffer, so if the allocation failed,
++      // erase this entry from the cache.
++      frame_buffers_.erase(it);
++      *fb_priv = nullptr;
++      return nullptr;
++    }
+ 
+     uint8_t* data = nullptr;
+     if (force_allocation_error_ ||
+@@ -86,6 +99,8 @@ uint8_t* FrameBufferPool::GetFrameBuffer(size_t min_size, void** fb_priv) {
+     frame_buffer->data_size = min_size;
+   }
+ 
++  frame_buffer->held_by_library = true;
++
+   // Provide the client with a private identifier.
+   *fb_priv = frame_buffer.get();
+   return frame_buffer->data.get();
 diff --git a/media/test/run_all_unittests.cc b/media/test/run_all_unittests.cc
-index f78864381ab0fda22ce82a9ca54b5df7ab0de32b..d795f621a8092b248d019af6cc7e6f29cb4d8e94 100644
+index d32a21bff4818035ea824395fd910b25fb6ef5a8..54763b53d8c090b085ccf3e3f7c79f83f7bdbc2f 100644
 --- a/media/test/run_all_unittests.cc
 +++ b/media/test/run_all_unittests.cc
 @@ -10,6 +10,7 @@
@@ -361,7 +376,7 @@ index f78864381ab0fda22ce82a9ca54b5df7ab0de32b..d795f621a8092b248d019af6cc7e6f29
  #include "mojo/core/embedder/embedder.h"
  
  #if defined(OS_ANDROID)
-@@ -46,6 +47,8 @@ void TestSuiteNoAtExit::Initialize() {
+@@ -43,6 +44,8 @@ void TestSuiteNoAtExit::Initialize() {
    media::SetUpFakeLocalizedStrings();
  
    base::DiscardableMemoryAllocator::SetInstance(&discardable_memory_allocator_);
