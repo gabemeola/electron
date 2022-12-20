@@ -156,11 +156,13 @@ cached_electron_version = None
 def get_electron_version():
   global cached_electron_version
   if cached_electron_version is None:
-    cached_electron_version = str.strip(execute([
-      'node',
-      '-p',
-      'require("./script/lib/get-version").getElectronVersion()'
-    ], cwd=ELECTRON_DIR).decode())
+    ver = execute([
+        'node',
+        '-p',
+        'require("./script/lib/get-version").getElectronVersion()'
+      ], cwd=ELECTRON_DIR).decode()
+
+    cached_electron_version = ver.strip()
   return cached_electron_version
 
 def store_artifact(prefix, key_prefix, files):
