@@ -134,3 +134,4 @@ disable_get_user_media.patch
 skid-proof_video_decoding_memory_use.patch
 silence_nonfatal_dump_on_gpu_process_mojo_error.patch
 discord_direct_video_sinks.patch
+fix_osx_resize_performance.patch
