@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mark Harmer <mark.harmer@discordapp.com>
+Date: Sun, 26 Feb 2023 11:27:18 -0800
+Subject: fix: v8 crash when accessing invalid embedder data slot indexes
+
+Fixes https://github.com/electron/electron/issues/36999
+
+Upstream issue opened at https://bugs.chromium.org/p/v8/issues/detail?id=13777
+
+diff --git a/src/heap/embedder-tracing.cc b/src/heap/embedder-tracing.cc
+index ceac516f9c..57becb809d 100644
+--- a/src/heap/embedder-tracing.cc
++++ b/src/heap/embedder-tracing.cc
+@@ -179,6 +179,8 @@ void LocalEmbedderHeapTracer::EmbedderWriteBarrier(Heap* heap,
+   DCHECK(js_object.MayHaveEmbedderFields());
+   if (cpp_heap_) {
+     DCHECK_NOT_NULL(heap->mark_compact_collector());
++
++    if (js_object.GetEmbedderFieldCount() < 2) return;
+     const EmbedderDataSlot type_slot(js_object,
+                                      wrapper_descriptor_.wrappable_type_index);
+     const EmbedderDataSlot instance_slot(
+
