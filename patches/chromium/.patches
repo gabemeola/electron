@@ -136,3 +136,4 @@ silence_nonfatal_dump_on_gpu_process_mojo_error.patch
 discord_direct_video_sinks.patch
 fix_osx_resize_performance.patch
 feat_enable_htmlmediaelement_audiotracks.patch
+cherry-pick-bcffbef7eb769.patch
