@@ -1,0 +1,34 @@
+From 23bbc4d36f12095a930fd786e893455cd3bc7a4b Mon Sep 17 00:00:00 2001
+From: Bill Carr <wicarr@microsoft.com>
+Date: Fri, 13 Jan 2023 16:22:26 +0000
+Subject: [PATCH 2/2] Fix Typo in gpu_driver_bug_list.json
+
+Removes an errant space for entry 408 (Disable Media Foundation Clear
+on older AMD drivers).
+
+Change-Id: I68ea68579401b444b4cd7febb47e86c94ecc710c
+Reviewed-on: https://chromium-review.googlesource.com/c/chromium/src/+/4160439
+Reviewed-by: Zhenyao Mo <zmo@chromium.org>
+Commit-Queue: William Carr <wicarr@microsoft.com>
+Cr-Commit-Position: refs/heads/main@{#1092436}
+(cherry picked from commit 1a32dd40f4f5b6381afc57b841fac2ff400c71c2)
+---
+ gpu/config/gpu_driver_bug_list.json | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gpu/config/gpu_driver_bug_list.json b/gpu/config/gpu_driver_bug_list.json
+index b5f6ae38e4605..8733956f3deb1 100644
+--- a/gpu/config/gpu_driver_bug_list.json
++++ b/gpu/config/gpu_driver_bug_list.json
+@@ -4125,7 +4125,7 @@
+       "vendor_id": "0x1002",
+       "driver_version": {
+         "op": "<=",
+-        "value": "26.20.15002.61 "
++        "value": "26.20.15002.61"
+       },
+       "features": [
+         "disable_media_foundation_clear_playback"
+-- 
+2.40.0
+

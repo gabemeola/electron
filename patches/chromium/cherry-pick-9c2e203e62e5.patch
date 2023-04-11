@@ -1,0 +1,103 @@
+From 9c2e203e62e5e7dcbf18e8cb9af61d616d5a78b8 Mon Sep 17 00:00:00 2001
+From: Bill Carr <wicarr@microsoft.com>
+Date: Fri, 2 Dec 2022 22:19:34 +0000
+Subject: [PATCH 1/2] Disable Media Foundation for Clear on older AMD drivers
+
+Edge Watson data shows a spike in crashes in atiuxp64 when experimenting
+with MF for Clear enabled.
+
+This change adds a new GPU Blocklist option for MF for Clear & creates
+a rule for AMD drivers equal to or below the highest AMD driver we've
+seen reported so far (26.20.15002.61).
+
+Bug: 1394484
+Change-Id: I27d0b89366e9e8ca867eac1d0c435225953046fc
+Reviewed-on: https://chromium-review.googlesource.com/c/chromium/src/+/4062911
+Reviewed-by: Dale Curtis <dalecurtis@chromium.org>
+Reviewed-by: Rafael Cintron <rafael.cintron@microsoft.com>
+Commit-Queue: William Carr <wicarr@microsoft.com>
+Cr-Commit-Position: refs/heads/main@{#1078791}
+(cherry picked from commit da5de4a2cff9ebf65a47273abb29a38d15d5442b)
+---
+ content/renderer/media/media_factory.cc | 13 ++++++++++++-
+ gpu/config/gpu_driver_bug_list.json     | 20 ++++++++++++++++++++
+ gpu/config/gpu_workaround_list.txt      |  1 +
+ 3 files changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/content/renderer/media/media_factory.cc b/content/renderer/media/media_factory.cc
+index fc6f9b87dbaf7..dcd82a2df0f7e 100644
+--- a/content/renderer/media/media_factory.cc
++++ b/content/renderer/media/media_factory.cc
+@@ -121,6 +121,7 @@
+ #include "content/renderer/media/win/dcomp_texture_wrapper_impl.h"
+ #include "content/renderer/media/win/overlay_state_observer_impl.h"
+ #include "content/renderer/media/win/overlay_state_service_provider.h"
++#include "gpu/config/gpu_driver_bug_workarounds.h"
+ #include "media/base/win/mf_feature_checks.h"
+ #include "media/cdm/win/media_foundation_cdm.h"
+ #include "media/mojo/clients/win/media_foundation_renderer_client_factory.h"
+@@ -673,7 +674,17 @@ MediaFactory::CreateRendererFactorySelector(
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN)
+-  bool use_mf_for_clear = media::SupportMediaFoundationClearPlayback();
++  // Enable Media Foundation for Clear if it is supported & there are no GPU
++  // workarounds enabled.
++  bool use_mf_for_clear = false;
++  if (media::SupportMediaFoundationClearPlayback()) {
++    if (auto gpu_channel_host = render_thread->EstablishGpuChannelSync()) {
++      use_mf_for_clear =
++          !gpu_channel_host->gpu_feature_info().IsWorkaroundEnabled(
++              gpu::DISABLE_MEDIA_FOUNDATION_CLEAR_PLAYBACK);
++    }
++  }
++
+   // Only use MediaFoundationRenderer when MediaFoundationCdm is available or
+   // MediaFoundation for Clear is supported.
+   if (media::MediaFoundationCdm::IsAvailable() || use_mf_for_clear) {
+diff --git a/gpu/config/gpu_driver_bug_list.json b/gpu/config/gpu_driver_bug_list.json
+index d2646b34e4bbf..b5f6ae38e4605 100644
+--- a/gpu/config/gpu_driver_bug_list.json
++++ b/gpu/config/gpu_driver_bug_list.json
+@@ -4110,6 +4110,26 @@
+       "features": [
+         "disable_accelerated_av1_encode"
+       ]
++    },
++    {
++      "id": 408,
++      "description": "Disable Media Foundation Clear Playback on older AMD drivers.",
++      "comment": [
++        "We see an increased frequency of crashes with Media Foundation for Clear",
++        "playback on older AMD drivers. Disabling the feature for all drivers upto",
++        "the highest observed driver for the failure."
++      ],
++      "os": {
++        "type": "win"
++      },
++      "vendor_id": "0x1002",
++      "driver_version": {
++        "op": "<=",
++        "value": "26.20.15002.61 "
++      },
++      "features": [
++        "disable_media_foundation_clear_playback"
++      ]
+     }
+   ]
+ }
+diff --git a/gpu/config/gpu_workaround_list.txt b/gpu/config/gpu_workaround_list.txt
+index f63fcccf50a61..357516a6f4657 100644
+--- a/gpu/config/gpu_workaround_list.txt
++++ b/gpu/config/gpu_workaround_list.txt
+@@ -48,6 +48,7 @@ disable_ext_draw_buffers
+ disable_gl_rgb_format
+ disable_half_float_for_gmb
+ disable_imagebitmap_from_video_using_gpu
++disable_media_foundation_clear_playback
+ disable_media_foundation_hardware_security
+ disable_multisampling_color_mask_usage
+ disable_nv12_dxgi_video
+-- 
+2.40.0
+
