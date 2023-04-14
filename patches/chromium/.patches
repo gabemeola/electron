@@ -140,3 +140,4 @@ cherry-pick-bcffbef7eb769.patch
 fix_build_do_not_depend_on_packed_resource_integrity_patch.patch
 cherry-pick-9c2e203e62e5.patch
 cherry-pick-1a32dd40f4f5.patch
+revert-remove-0x15dd-device-from-blocklist.patch

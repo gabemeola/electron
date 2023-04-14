@@ -1,0 +1,32 @@
+From b2ce96b1f05fea07fcd8787b8b7d0452b5583617 Mon Sep 17 00:00:00 2001
+From: Alex Converse <alex.converse@discordapp.com>
+Date: Fri, 14 Apr 2023 10:19:43 -0700
+Subject: [PATCH] revert "remove 0x15dd device from blocklist"
+
+This reverts commit 160fe0e19fd4f5327b73e148467c8f0d035522a8.
+
+The code does not remove the card it claims to remove.
+
+The reverted commit removes 0x15d8 from the list. 0x15d8 is a top
+decoder freeze card and had substantially fewer issues in e13/m91
+before this relaxation.
+---
+ gpu/config/gpu_driver_bug_list.json | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/gpu/config/gpu_driver_bug_list.json b/gpu/config/gpu_driver_bug_list.json
+index d2646b34e4bbf..8ec37e0111a50 100644
+--- a/gpu/config/gpu_driver_bug_list.json
++++ b/gpu/config/gpu_driver_bug_list.json
+@@ -3448,7 +3448,7 @@
+         "type": "win"
+       },
+       "vendor_id": "0x1002",
+-      "device_id": ["0x98e4", "0x15dd"],
++      "device_id": ["0x98e4", "0x15d8", "0x15dd"],
+       "features": [
+         "disable_d3d11_video_decoder"
+       ],
+-- 
+2.40.0
+
